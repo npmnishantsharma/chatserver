@@ -41,7 +41,9 @@ const chatRoutes = require('./routes/chat');
 const createSessionRoutes = require('./routes/createSession');
 app.use('/web', chatRoutes);
 app.use('/web', createSessionRoutes);
-
+app.get('/ping', (req,res) =>{
+    res.send('pong')
+})
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error('Global error handler:', err);
