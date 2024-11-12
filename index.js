@@ -11,8 +11,6 @@ const port = process.env.PORT||3009;
 // Enable CORS first
 app.use(cors({
     origin: "*",
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Add body parser middleware with increased limit
