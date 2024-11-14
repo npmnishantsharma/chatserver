@@ -7,28 +7,41 @@ const path = require('path');
 const imageAnalysisRoutes = require('./routes/imageAnalysis');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
+const https = require('https');
+const http = require('http');
 
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT||3009;
+const port = process.env.PORT || 3009;
 
-// Create HTTP server instance
-const server = require('http').createServer(app);
+// Create server instance based on environment
+let server;
+if (process.env.NODE_ENV === 'production') {
+    // For Render deployment, we don't need to create HTTPS server
+    // as Render handles SSL/TLS termination
+    server = http.createServer(app);
+    console.log('Created HTTP server for production (SSL handled by Render)');
+} else {
+    // For local development
+    server = http.createServer(app);
+    console.log('Created HTTP server for development');
+}
 
 // Create WebSocket server attached to HTTP server
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ 
+    server,
+    path: '/', // Explicitly set the WebSocket path
+    clientTracking: true // Enable built-in client tracking
+});
 
 // Store active connections and sessions
 const connections = new Map();
 const userSessions = new Map();
 
+// Middleware setup
 app.use(express.json());
-
-// Enable CORS
-app.use(cors("*"));
-
-// Add body parser middleware with increased limit
+app.use(cors());
 app.use(bodyParser.json({
     limit: '50mb',
     verify: (req, res, buf) => {
@@ -48,65 +61,6 @@ app.use(bodyParser.urlencoded({
     extended: true, 
     limit: '50mb' 
 }));
-
-// Routes
-const chatRoutes = require('./routes/chat');
-const createSessionRoutes = require('./routes/createSession');
-const quizRoutes = require('./routes/quiz');
-
-app.use('/web', chatRoutes);
-app.use('/web', createSessionRoutes);
-app.use('/web', imageAnalysisRoutes);
-app.use('/quiz', quizRoutes);
-app.use(express.static('public'));
-
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-    console.error('Global error handler:', err);
-    
-    if (req.accepts('html')) {
-        res.status(500).send(`
-            <html>
-                <body style="background: #1a1a1a; color: white; font-family: system-ui; padding: 2rem;">
-                    <h1>Error</h1>
-                    <p>${err.message}</p>
-                </body>
-            </html>
-        `);
-    } else {
-        res.status(500).json({
-            status: 'error',
-            message: 'Internal server error',
-            error: err.message
-        });
-    }
-});
-
-// Start server
-server.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
-});
-
-// Image upload endpoint
-app.post('/chat', async (req, res) => {
-    const { message, imageData } = req.body;
-    
-    if (imageData) {
-        const base64Data = imageData.replace(/^data:image\/png;base64,/, '');
-        const uploadsDir = path.join(__dirname, 'uploads');
-        
-        try {
-            await fs.mkdir(uploadsDir, { recursive: true });
-            const filename = `drawing-${Date.now()}.png`;
-            const filepath = path.join(uploadsDir, filename);
-            await fs.writeFile(filepath, base64Data, 'base64');
-        } catch (err) {
-            console.error('Error saving image:', err);
-            res.status(500).json({ error: 'Failed to save image' });
-        }
-    }
-});
 
 // Function to broadcast session count to all connections of a user
 const broadcastSessionCount = (userId) => {
@@ -193,5 +147,24 @@ wss.on('connection', (ws, req) => {
         type: 'connection',
         status: 'connected'
     }));
+});
+
+// Routes
+app.use('/web', imageAnalysisRoutes);
+app.use(express.static('public'));
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Global error handler:', err);
+    res.status(500).json({
+        status: 'error',
+        message: 'Internal server error',
+        error: err.message
+    });
+});
+
+// Start server
+server.listen(port, () => {
+    console.log(`Server is running on port ${port} (${process.env.NODE_ENV || 'development'})`);
 });
 
