@@ -13,6 +13,7 @@ const http = require('http');
 dotenv.config();
 
 const app = express();
+const connections = new Map();
 const port = process.env.PORT || 3009;
 
 // Create server instance based on environment
