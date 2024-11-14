@@ -40,156 +40,74 @@ app.use(cors({
 // Create WebSocket server with more specific configuration
 const wss = new WebSocket.Server({ 
     server,
-    path: '/ws', // Specific path for WebSocket connections
     clientTracking: true,
-    // Add WebSocket server options
-    verifyClient: (info, cb) => {
-        const origin = info.origin || info.req.headers.origin;
-        // Allow connections from our domains
-        const allowedOrigins = process.env.NODE_ENV === 'production'
-            ? ['https://mathsketch.nishantapps.in', 'https://chatserver-r7nu.onrender.com']
-            : ['http://localhost:3000'];
-            
-        if (allowedOrigins.includes(origin)) {
-            cb(true);
-        } else {
-            cb(false, 403, 'Forbidden');
-        }
-    },
-    handleProtocols: (protocols, req) => {
-        // Accept any protocol or return false if none are supported
-        return protocols[0] || false;
-    }
+    // Remove path and verifyClient for now to test basic connectivity
+    pingTimeout: 30000, // 30 seconds
+    pingInterval: 25000 // 25 seconds
 });
 
-// Add heartbeat to keep connections alive
+// Update the heartbeat mechanism
+function noop() {}
+
 function heartbeat() {
     this.isAlive = true;
 }
 
-const interval = setInterval(function ping() {
-    wss.clients.forEach(function each(ws) {
-        if (ws.isAlive === false) return ws.terminate();
-        ws.isAlive = false;
-        ws.ping();
-    });
-}, 30000);
-
-// Store active connections and sessions
-const connections = new Map();
-const userSessions = new Map();
-
-// Middleware setup
-app.use(express.json());
-app.use(cors());
-app.use(bodyParser.json({
-    limit: '50mb',
-    verify: (req, res, buf) => {
-        try {
-            JSON.parse(buf);
-        } catch(e) {
-            res.status(400).json({ 
-                status: 'error', 
-                message: 'Invalid JSON' 
-            });
-            throw new Error('Invalid JSON');
-        }
-    }
-}));
-
-app.use(bodyParser.urlencoded({ 
-    extended: true, 
-    limit: '50mb' 
-}));
-
-// Function to broadcast session count to all connections of a user
-const broadcastSessionCount = (userId) => {
-    if (userSessions.has(userId)) {
-        const sessionCount = userSessions.get(userId).size;
-        userSessions.get(userId).forEach(sessionId => {
-            const connection = connections.get(sessionId);
-            if (connection && connection.readyState === WebSocket.OPEN) {
-                connection.send(JSON.stringify({
-                    type: 'sessions',
-                    count: sessionCount
-                }));
-            }
-        });
-    }
-};
-
-// Function to broadcast updates to all active users
-const broadcastAllUpdates = () => {
-    for (const [userId] of userSessions) {
-        broadcastSessionCount(userId);
-    }
-};
-
-// Set up interval for regular updates
-setInterval(broadcastAllUpdates, 5000);
-
 // WebSocket connection handler
 wss.on('connection', (ws, req) => {
-    console.log('New WebSocket connection from:', req.headers.origin);
-    ws.isAlive = true;
-    ws.on('pong', heartbeat);
-    
     const connectionId = uuidv4();
+    const timestamp = new Date().toISOString();
+    
+    console.log('New WebSocket connection:', {
+        id: connectionId,
+        timestamp,
+        remoteAddress: req.socket.remoteAddress,
+        headers: {
+            origin: req.headers.origin,
+            userAgent: req.headers['user-agent']
+        }
+    });
+    
+    ws.isAlive = true;
+    ws.connectionId = connectionId;
+    ws.connectionTime = timestamp;
+    
+    ws.on('pong', heartbeat);
+    ws.on('error', (error) => {
+        console.error('WebSocket error:', {
+            connectionId,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+            remoteAddress: req.socket.remoteAddress
+        });
+    });
+    
+    ws.on('close', (code, reason) => {
+        console.log('WebSocket closed:', {
+            connectionId,
+            code,
+            reason: reason.toString(),
+            timestamp: new Date().toISOString(),
+            duration: `${(new Date().getTime() - new Date(timestamp).getTime()) / 1000}s`
+        });
+    });
+
     connections.set(connectionId, ws);
-
-    // Handle incoming messages
-    ws.on('message', (message) => {
-        try {
-            const data = JSON.parse(message);
-            
-            // Handle session registration
-            if (data.type === 'register') {
-                const { userId } = data;
-                if (!userSessions.has(userId)) {
-                    userSessions.set(userId, new Set());
-                }
-                userSessions.get(userId).add(connectionId);
-                
-                // Broadcast updated session count immediately
-                broadcastSessionCount(userId);
-            }
-            if(data.type === 'getUpdates') {
-                const { userId } = data;
-                broadcastSessionCount(userId);
-            }
-        } catch (error) {
-            console.error('Error processing WebSocket message:', error);
-        }
-    });
-
-    // Handle client disconnection
-    ws.on('close', () => {
-        // Clean up the connection
-        connections.delete(connectionId);
-        
-        // Remove session from user sessions and notify others
-        for (const [userId, sessions] of userSessions.entries()) {
-            if (sessions.has(connectionId)) {
-                sessions.delete(connectionId);
-                
-                // Broadcast updated count to remaining sessions
-                broadcastSessionCount(userId);
-                
-                // Clean up empty user entries
-                if (sessions.size === 0) {
-                    userSessions.delete(userId);
-                }
-                break;
-            }
-        }
-    });
-
-    // Send initial connection status
-    ws.send(JSON.stringify({
-        type: 'connection',
-        status: 'connected'
-    }));
+    ws.ping(noop);
 });
+
+// Update the ping interval
+const interval = setInterval(function ping() {
+    wss.clients.forEach(function each(ws) {
+        if (ws.isAlive === false) {
+            console.log('Terminating inactive connection');
+            return ws.terminate();
+        }
+        
+        ws.isAlive = false;
+        ws.ping(noop);
+    });
+}, 30000);
 
 wss.on('close', function close() {
     clearInterval(interval);
