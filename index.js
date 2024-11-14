@@ -28,12 +28,52 @@ if (process.env.NODE_ENV === 'production') {
     console.log('Created HTTP server for development');
 }
 
-// Create WebSocket server attached to HTTP server
+// Update CORS configuration to be more specific
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://mathsketch.nishantapps.in', 'https://chatserver-r7nu.onrender.com']
+    : '*',
+  methods: ['GET', 'POST'],
+  credentials: true
+}));
+
+// Create WebSocket server with more specific configuration
 const wss = new WebSocket.Server({ 
     server,
-    path: '/', // Explicitly set the WebSocket path
-    clientTracking: true // Enable built-in client tracking
+    path: '/ws', // Specific path for WebSocket connections
+    clientTracking: true,
+    // Add WebSocket server options
+    verifyClient: (info, cb) => {
+        const origin = info.origin || info.req.headers.origin;
+        // Allow connections from our domains
+        const allowedOrigins = process.env.NODE_ENV === 'production'
+            ? ['https://mathsketch.nishantapps.in', 'https://chatserver-r7nu.onrender.com']
+            : ['http://localhost:3000'];
+            
+        if (allowedOrigins.includes(origin)) {
+            cb(true);
+        } else {
+            cb(false, 403, 'Forbidden');
+        }
+    },
+    handleProtocols: (protocols, req) => {
+        // Accept any protocol or return false if none are supported
+        return protocols[0] || false;
+    }
 });
+
+// Add heartbeat to keep connections alive
+function heartbeat() {
+    this.isAlive = true;
+}
+
+const interval = setInterval(function ping() {
+    wss.clients.forEach(function each(ws) {
+        if (ws.isAlive === false) return ws.terminate();
+        ws.isAlive = false;
+        ws.ping();
+    });
+}, 30000);
 
 // Store active connections and sessions
 const connections = new Map();
@@ -90,7 +130,9 @@ setInterval(broadcastAllUpdates, 5000);
 
 // WebSocket connection handler
 wss.on('connection', (ws, req) => {
-    console.log('New WebSocket connection');
+    console.log('New WebSocket connection from:', req.headers.origin);
+    ws.isAlive = true;
+    ws.on('pong', heartbeat);
     
     const connectionId = uuidv4();
     connections.set(connectionId, ws);
@@ -149,9 +191,18 @@ wss.on('connection', (ws, req) => {
     }));
 });
 
+wss.on('close', function close() {
+    clearInterval(interval);
+});
+
 // Routes
 app.use('/web', imageAnalysisRoutes);
 app.use(express.static('public'));
+
+// Add a health check endpoint
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', connections: wss.clients.size });
+});
 
 // Error handling middleware
 app.use((err, req, res, next) => {
