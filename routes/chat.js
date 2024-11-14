@@ -118,4 +118,61 @@ router.post('/chat/:sessionId', async (req, res) => {
   }
 });
 
+// Add the quiz generation endpoint
+router.post('/generate-quiz', async (req, res) => {
+  try {
+    const { topic, concepts, number_of_questions = 15 } = req.body;
+
+    const prompt = `
+    Generate ${number_of_questions} multiple-choice quiz questions about ${topic}. 
+    Use these concepts as reference: ${concepts}
+    
+    Each question should:
+    1. Be clear and concise
+    2. Have 4 options (A, B, C, D)
+    3. Include one correct answer
+    4. Include a brief explanation of why the answer is correct
+    
+    Format each question as a JSON object with these fields:
+    - question: The question text
+    - options: Array of 4 possible answers
+    - correctAnswer: The correct answer
+    - explanation: Why this answer is correct
+    
+    Return an array of these question objects.
+    `;
+
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    const result = await model.generateContent(prompt);
+    const response = result.response;
+    const text = response.text();
+    
+    // Extract JSON from the response
+    const jsonMatch = text.match(/```json\n?(.*?)\n?```/s) || text.match(/\[(.*)\]/s);
+    const jsonStr = jsonMatch ? jsonMatch[1] : text;
+    
+    try {
+      const questions = JSON.parse(jsonStr);
+      res.json({
+        status: 'success',
+        questions: questions.slice(0, number_of_questions)
+      });
+    } catch (parseError) {
+      console.error('Error parsing questions:', parseError);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to parse quiz questions',
+        questions: []
+      });
+    }
+  } catch (error) {
+    console.error('Error generating quiz:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message,
+      questions: []
+    });
+  }
+});
+
 module.exports = router;
