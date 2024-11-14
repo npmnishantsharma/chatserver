@@ -11,7 +11,7 @@ const { v4: uuidv4 } = require('uuid');
 dotenv.config();
 
 const app = express();
-const port = 3009;
+const port = process.env.PORT||3009;
 
 // Create HTTP server instance
 const server = require('http').createServer(app);
