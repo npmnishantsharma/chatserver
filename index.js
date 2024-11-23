@@ -30,13 +30,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Update CORS configuration to be more specific
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://mathsketch.nishantapps.in', 'https://chatserver-r7nu.onrender.com']
-    : '*',
-  methods: ['GET', 'POST'],
-  credentials: true
-}));
+app.use(cors());
 
 // Create WebSocket server with more specific configuration
 const wss = new WebSocket.Server({ 
