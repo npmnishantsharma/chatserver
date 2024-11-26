@@ -30,7 +30,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Update CORS configuration to be more specific
-app.use(cors());
+app.use(cors('*'));
 
 // Create WebSocket server with more specific configuration
 const wss = new WebSocket.Server({ 
